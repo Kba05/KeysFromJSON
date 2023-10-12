@@ -1,16 +1,24 @@
-const tempObj = document.getElementById("jsonArea");
-const btn = document.getElementById("getKeysBtn");
+// areas with data
+const jsonTextArea = document.getElementById("jsonArea");
 const resultArea = document.getElementById("resultArea");
-const keyWrapper = document.getElementById("keyWrapper");
+// btns
 const copyBtn = document.getElementById("copyTobuffBtn");
-const radioBtns = document.querySelectorAll("input[name='wrappers']")
+const btnGetKeys = document.getElementById("getKeysBtn");
+const clearAreas = document.getElementById("clearAreas");
+// wrappers
+const customKeyWrapper = document.getElementById("customKeyWrapper");
 const wrappersList = document.getElementById("wrappersList");
-
+// radio btn
+const radioBtns = document.querySelectorAll("input[name='wrappers']")
+const radioCustomWrappers = document.getElementById("radioCustomWrappers");
+const radioSelectWrappers = document.getElementById("radioSelectWrappers");
+// variable for wrapping keys
 let wrapperOfKey = {
-    left:'"',
-    right:'"'
+    left:wrappersList.value.split(' ')[0],
+    right:wrappersList.value.split(' ')[1]
 }
 
+// manage json
 function getNestedKeys(obj) {
     let keys = [];
 
@@ -30,32 +38,62 @@ function getNestedKeys(obj) {
     const newSet = new Set(keys);
     const uniquekeys = Array.from(newSet);
     const stringFromArray = uniquekeys.join(', \n');
-    console.log(stringFromArray);
     return stringFromArray;
 
 }
 
-btn.addEventListener('click',()=>{
-    const parsedObj = JSON.parse(tempObj.value);
+// autosizing textarea
+function autosize(){
+    this.style.height = 'auto';
+    this.style.height = this.scrollHeight + 'px';
+}
+
+// button handlers
+// handler for btn "Get keys"
+btnGetKeys.addEventListener('click',()=>{
+    const parsedObj = JSON.parse(jsonTextArea.value);
     resultArea.value = getNestedKeys(parsedObj);
+    // autosize jsonTextArea
+    autosize.apply(resultArea);
 })
 
+// handler for btn "Copy to buffer"
 copyBtn.addEventListener('click',()=>{
     resultArea.select();
     document.execCommand('copy');
 })
 
-for(let i=0; radioBtns.length>i; i++){
-    radioBtns[i].addEventListener('change',()=>onChangeRadioBtn(radioBtns[i]))
-}
+// handler for react to change customKeyWrapper radio btn value
+radioCustomWrappers.addEventListener('change',()=>{
+    wrappersList.disabled = true;
+    wrappersList.value = '" "'
+    customKeyWrapper.disabled = false;
+    wrapperOfKey = {
+        left:customKeyWrapper.value,
+        right:customKeyWrapper.value
+    };
+})
 
-keyWrapper.addEventListener('change',(event)=>{
+// handler for react to change selector radio btn value
+radioSelectWrappers.addEventListener('change',()=>{
+    wrappersList.disabled = false;
+    customKeyWrapper.disabled = true;
+    customKeyWrapper.value = ''
+    wrapperOfKey = {
+        left:wrappersList.value.split(' ')[0],
+        right:wrappersList.value.split(' ')[1]
+    };
+})
+
+// handler for react to change value of customKeyWrapper
+customKeyWrapper.addEventListener('change',(event)=>{
     wrapperOfKey = {
         left:event.target.value,
         right:event.target.value
     }
 })
 
+// handler for react to change value of wrappersList
 wrappersList.addEventListener('change',(event)=>{
     wrapperOfKey = {
         left:event.target.value.split(' ')[0],
@@ -63,36 +101,11 @@ wrappersList.addEventListener('change',(event)=>{
     }
 })
 
-const onChangeRadioBtn = (radioBtn)=>{
-    console.log(radioBtn.id)
-    switch(radioBtn.id){
-        case 'customWrappers':
-            wrappersList.disabled = true;
-            wrappersList.value = '1'
-
-            keyWrapper.disabled = false;
-
-            wrapperOfKey = {
-                left:keyWrapper.value,
-                right:keyWrapper.value
-            };
-        break;
-        
-        case 'SelectWrappers':
-            wrappersList.disabled = false;
-            keyWrapper.disabled = true;
-            keyWrapper.value = ''
-            wrapperOfKey = {
-                left:wrappersList.value.split(' ')[0],
-                right:wrappersList.value.split(' ')[1]
-            };
-        break;
-    }
-}
-
-tempObj.addEventListener( 'input', autosize );
-             
-function autosize(){
-  this.style.height = 'auto';
-  this.style.height = this.scrollHeight + 'px';
-}
+// autosize jsonTextArea
+jsonTextArea.addEventListener( 'input', autosize );
+           
+// clearArea
+clearAreas.addEventListener('click',()=>{
+    jsonTextArea.value = '';
+    resultArea.value = '';
+})

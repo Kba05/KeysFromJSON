@@ -18,23 +18,34 @@
                 <h5>Wrapper for keys:</h5>
             </div>
             <div class="row">
-                <div class="col-2 mb-3">
-                    <input class="form-check-input" type="radio" name="wrappers" id="customWrappers">
-                    <label for="customWrappers">Custom wrappers:</label>
-                    <input class="form-control"  style="width: auto;" name="keyWrapper" id="keyWrapper" disabled="true">
+                <div class="col-3 mb-3 d-flex align-items-center">
+                    <input checked class="form-check-input me-2" type="radio" name="wrappers" id="radioSelectWrappers">
+                    <label for="radioSelectWrappers">
+                        Select from list:
+                        <select class="form-select d-inline" style="width: auto;" id="wrappersList">
+                            <option selected value='" "'>" "</option>
+                            <option value="' '">' '</option>
+                            <option value="‹ ›">‹ ›</option>
+                            <option value="< >">< ></option>
+                            <option value="« »">« »</option>
+                            <option value="❝ ❞">❝ ❞</option>
+                            <option value="❛ ❜">❛ ❜</option>
+                            <option value="( )">( )</option>
+                        </select>
+                    </label>
                 </div>
-                <div class="col-2 mb-3">
-                    <input class="form-check-input" type="radio" name="wrappers" id="SelectWrappers">
-                    <label for="SelectWrappers">Select from list:</label>
-                    <select class="form-select" style="width: auto;" id="wrappersList" disabled="true">
-                        <option selected value="1">Open this select</option>
-                        <option value="‹ ›">‹ ›</option>
-                        <option value="< >">< ></option>
-                        <option value="« »">« »</option>
-                        <option value="❝ ❞">❝ ❞</option>
-                        <option value="❛ ❜">❛ ❜</option>
-                    </select>
+                <div class="col-4 mb-3 d-flex align-items-center ">
+                    <input class="form-check-input me-2" type="radio" name="wrappers" id="radioCustomWrappers">
+                    <label for="radioCustomWrappers">
+                        Custom wrappers:
+                        <input class="form-control d-inline"  style="width: auto;" name="keyWrapper" id="customKeyWrapper" disabled="true">
+                    </label>
+                    
                 </div>
+                <div class="col-5 mb-3 d-flex align-items-center">
+                    <button id="clearAreas" class="btn btn-primary mt-3 mb-3">Clear Areas</button>
+                </div>
+
             </div>
         </div>
         <div class="card my-3">
