@@ -1,0 +1,19 @@
+{
+  "name": "Keys from JSON",
+  "short_name": "Keys from JSON",
+  "description": "Pull every key out of a JSON document and turn it into a quoted list, key paths, TypeScript types, SQL columns or a custom template. Works offline; nothing is uploaded.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d6efd",
+  "categories": ["developer", "utilities", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,78 +1,416 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Bootstrap demo</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
-        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <title>Keys from JSON — keys, paths and types out of any JSON</title>
+    <meta name="description"
+        content="Paste JSON, get every key back as a quoted list, a key path, a TypeScript type, SQL columns or a custom template. Everything runs in your browser, nothing is uploaded.">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#0d6efd">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta property="og:title" content="Keys from JSON">
+    <meta property="og:description"
+        content="Every key from a JSON document, as a list, a path set, a TypeScript type or SQL — all client-side.">
+    <meta property="og:type" content="website">
+
+    <!-- Theme is applied before first paint so a dark-mode reload never flashes white. -->
+    <script>
+        (() => {
+            try {
+                const stored = localStorage.getItem('kfj.theme');
+                const preferred = stored || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-bs-theme', preferred);
+            } catch {
+                /* private mode: the light theme is a fine default */
+            }
+        })();
+    </script>
 </head>
 
 <body>
-    <div class="container">
-        <!-- Content here -->
-        <div class="container sticky-top bg-light border border-top-0  rounded rounded-top-0">
-            <div class="row">
-                <h4 class="border-bottom border-2 p-2"> Get Keys From JSON</h4> 
-                <h5>Wrapper for keys:</h5>
-            </div>
-            <div class="row">
-                <div class="col-3 mb-3 d-flex align-items-center">
-                    <input checked class="form-check-input me-2" type="radio" name="wrappers" id="radioSelectWrappers">
-                    <label for="radioSelectWrappers">
-                        Select from list:
-                        <select class="form-select d-inline" style="width: auto;" id="wrappersList">
-                            <option selected value='" "'>" "</option>
-                            <option value="' '">' '</option>
-                            <option value="‹ ›">‹ ›</option>
-                            <option value="< >">< ></option>
-                            <option value="« »">« »</option>
-                            <option value="❝ ❞">❝ ❞</option>
-                            <option value="❛ ❜">❛ ❜</option>
-                            <option value="( )">( )</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="col-4 mb-3 d-flex align-items-center ">
-                    <input class="form-check-input me-2" type="radio" name="wrappers" id="radioCustomWrappers">
-                    <label for="radioCustomWrappers">
-                        Custom wrappers:
-                        <input class="form-control d-inline"  style="width: auto;" name="keyWrapper" id="customKeyWrapper" disabled="true">
-                    </label>
-                    
-                </div>
-                <div class="col-5 mb-3 d-flex align-items-center">
-                    <button id="clearAreas" class="btn btn-primary mt-3 mb-3">Clear Areas</button>
-                </div>
+    <a class="visually-hidden-focusable skip-link" href="#jsonInput">Skip to the JSON input</a>
 
+    <header class="app-header">
+        <div class="container-xxl d-flex align-items-center gap-3 flex-wrap">
+            <h1 class="brand mb-0">
+                <span class="brand-brace" aria-hidden="true">{&hairsp;}</span>
+                Keys from JSON
+            </h1>
+            <span class="badge rounded-pill text-bg-success-subtle border border-success-subtle"
+                title="There is no server: parsing and generation happen in this tab.">
+                runs in your browser
+            </span>
+
+            <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="historyBtn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false">
+                        History
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end history-menu" id="historyMenu"
+                        aria-labelledby="historyBtn">
+                        <li><span class="dropdown-item-text text-body-secondary small">Nothing saved yet</span></li>
+                    </ul>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="shortcutsBtn"
+                    data-bs-toggle="modal" data-bs-target="#shortcutsModal">
+                    Shortcuts
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="themeToggle"
+                    aria-label="Switch between light and dark theme">
+                    <span id="themeIcon" aria-hidden="true">◐</span>
+                </button>
             </div>
         </div>
-        <div class="card my-3">
-            <div class="card-body">
-                
+    </header>
 
-                <div class="row">
-                    <div class="col-6 mb-3">
-                        <h5 class="card-title">Put your JSON:</h5>
-                        <textarea id="jsonArea" class="form-control" rows="10"></textarea>
-                        <button id="getKeysBtn" class="btn btn-primary mt-3 mb-3">Get Keys</button>
+    <main class="container-xxl pb-5">
+        <div class="row g-3">
+            <!-- ---------------------------------------------------------------- -->
+            <!-- Input                                                            -->
+            <!-- ---------------------------------------------------------------- -->
+            <section class="col-xl-6">
+                <div class="panel h-100">
+                    <div class="panel-head">
+                        <h2 class="panel-title">JSON input</h2>
+                        <div class="d-flex align-items-center gap-2 flex-wrap ms-auto">
+                            <label class="visually-hidden" for="inputMode">Input mode</label>
+                            <select class="form-select form-select-sm w-auto" id="inputMode">
+                                <option value="auto" selected>Auto-detect</option>
+                                <option value="json">JSON only</option>
+                                <option value="ndjson">NDJSON / JSON Lines</option>
+                                <option value="relaxed">Relaxed input</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="formatJsonBtn"
+                                title="Pretty-print the input">Format</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="minifyBtn"
+                                title="Collapse the input onto one line">Minify</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="sampleBtn"
+                                title="Load a sample document">Sample</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="openFileBtn"
+                                title="Open a .json or .ndjson file">Open</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="clearBtn"
+                                title="Clear both areas">Clear</button>
+                        </div>
                     </div>
-    
-                    <div class="col-6 mb-3">
-                        <h5 class="card-title">Result</h5>
-                        <textarea id="resultArea" class="form-control" rows="10"></textarea>
-                        <button id="copyTobuffBtn" class="btn btn-primary mt-3 mb-3">Copy to Buffer</button>
+
+                    <div id="errorBanner" class="alert alert-danger panel-alert" role="alert" hidden>
+                        <div class="d-flex align-items-start gap-2">
+                            <div class="flex-grow-1">
+                                <strong id="errorTitle">Invalid JSON</strong>
+                                <div id="errorLocation" class="small"></div>
+                                <pre id="errorSnippet" class="error-snippet mb-0" aria-hidden="true"></pre>
+                            </div>
+                            <button class="btn btn-sm btn-danger flex-shrink-0" type="button" id="repairBtn"
+                                hidden>Repair</button>
+                        </div>
+                    </div>
+
+                    <div id="dropZone" class="drop-zone">
+                        <label class="visually-hidden" for="jsonInput">JSON to analyse</label>
+                        <textarea id="jsonInput" class="form-control code-area" rows="14" spellcheck="false"
+                            autocapitalize="off" autocomplete="off" placeholder='Paste JSON here, or drop a .json file
+
+{ "user": { "id": 1, "name": "Ada" }, "tags": ["a", "b"] }'></textarea>
+                    </div>
+
+                    <div class="panel-foot" id="inputStats"></div>
+                </div>
+            </section>
+
+            <!-- ---------------------------------------------------------------- -->
+            <!-- Output                                                           -->
+            <!-- ---------------------------------------------------------------- -->
+            <section class="col-xl-6">
+                <div class="panel h-100">
+                    <div class="panel-head">
+                        <h2 class="panel-title">Output</h2>
+                        <div class="d-flex align-items-center gap-2 flex-wrap ms-auto">
+                            <label class="visually-hidden" for="formatSelect">Output format</label>
+                            <select class="form-select form-select-sm w-auto format-select" id="formatSelect"></select>
+                            <button class="btn btn-sm btn-primary" type="button" id="copyBtn">Copy</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="downloadBtn"
+                                title="Save the output as a file">Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="shareBtn"
+                                title="Copy a link that restores this input and these options">Link</button>
+                        </div>
+                    </div>
+
+                    <div id="formatHint" class="format-hint small text-body-secondary"></div>
+
+                    <pre id="output" class="code-output" tabindex="0" aria-live="polite"
+                        aria-label="Generated output"></pre>
+
+                    <div class="panel-foot" id="outputStats"></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- -------------------------------------------------------------------- -->
+        <!-- Options                                                              -->
+        <!-- -------------------------------------------------------------------- -->
+        <section class="panel mt-3">
+            <div class="panel-head">
+                <h2 class="panel-title">Options</h2>
+                <button class="btn btn-sm btn-outline-secondary ms-auto" type="button" id="resetOptionsBtn">Reset to
+                    defaults</button>
+            </div>
+
+            <div class="options-grid">
+                <fieldset class="option-group">
+                    <legend>Key wrapper</legend>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="wrapperMode" id="wrapperPresetRadio" checked>
+                        <label class="form-check-label" for="wrapperPresetRadio">Preset</label>
+                    </div>
+                    <label class="visually-hidden" for="wrapperPreset">Wrapper preset</label>
+                    <select class="form-select form-select-sm" id="wrapperPreset"></select>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="wrapperMode" id="wrapperCustomRadio">
+                        <label class="form-check-label" for="wrapperCustomRadio">Custom</label>
+                    </div>
+                    <div class="d-flex gap-2 align-items-end mt-1">
+                        <div class="flex-fill">
+                            <label class="form-label small mb-0" for="wrapperLeft">Left</label>
+                            <input class="form-control form-control-sm" id="wrapperLeft" disabled>
+                        </div>
+                        <div class="flex-fill">
+                            <label class="form-label small mb-0" for="wrapperRight">Right</label>
+                            <input class="form-control form-control-sm" id="wrapperRight" disabled>
+                        </div>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" id="wrapperMirror" checked>
+                        <label class="form-check-label small" for="wrapperMirror">Auto-close or mirror the
+                            left</label>
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend>Names</legend>
+                    <label class="form-label small mb-0" for="nameSource">Name source</label>
+                    <select class="form-select form-select-sm" id="nameSource">
+                        <option value="key" selected>Key name</option>
+                        <option value="path">Full path</option>
+                    </select>
+
+                    <label class="form-label small mb-0 mt-2" for="caseMode">Case</label>
+                    <select class="form-select form-select-sm" id="caseMode"></select>
+
+                    <label class="form-label small mb-0 mt-2" for="separator">Separator</label>
+                    <select class="form-select form-select-sm" id="separator"></select>
+
+                    <label class="form-label small mb-0 mt-2" for="sortMode">Sort</label>
+                    <select class="form-select form-select-sm" id="sortMode"></select>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend>Paths</legend>
+                    <label class="form-label small mb-0" for="pathStyle">Notation</label>
+                    <select class="form-select form-select-sm" id="pathStyle"></select>
+                    <div class="form-text" id="pathExample"></div>
+
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="realIndices">
+                        <label class="form-check-label small" for="realIndices">Use real array indices</label>
+                    </div>
+                    <div class="form-text">Off renders <code>list[].name</code>, on renders <code>list[0].name</code>.
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend>Filtering</legend>
+                    <label class="form-label small mb-0" for="nodeFilter">Node filter</label>
+                    <select class="form-select form-select-sm" id="nodeFilter">
+                        <option value="all" selected>All keys</option>
+                        <option value="leaf">Leaf keys only</option>
+                        <option value="container">Objects &amp; arrays only</option>
+                    </select>
+
+                    <label class="form-label small mb-0 mt-2" for="maxDepth">Max depth</label>
+                    <input class="form-control form-control-sm" id="maxDepth" type="number" min="0" step="1"
+                        placeholder="unlimited">
+
+                    <label class="form-label small mb-0 mt-2" for="dedupeBy">De-duplicate by</label>
+                    <select class="form-select form-select-sm" id="dedupeBy">
+                        <option value="name" selected>Name</option>
+                        <option value="path">Path</option>
+                        <option value="none">Keep duplicates</option>
+                    </select>
+
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="ignoreCase">
+                        <label class="form-check-label small" for="ignoreCase">Ignore case when de-duplicating</label>
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend>Search &amp; patterns</legend>
+                    <label class="form-label small mb-0" for="search">Substring</label>
+                    <input class="form-control form-control-sm" id="search" placeholder="filter the key list">
+
+                    <label class="form-label small mb-0 mt-2" for="includePattern">Include regex</label>
+                    <input class="form-control form-control-sm" id="includePattern" placeholder="^user_">
+                    <div class="form-text text-danger" id="includeError" hidden></div>
+
+                    <label class="form-label small mb-0 mt-2" for="excludePattern">Exclude regex</label>
+                    <input class="form-control form-control-sm" id="excludePattern" placeholder="_meta$">
+                    <div class="form-text text-danger" id="excludeError" hidden></div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend>Generated code</legend>
+                    <label class="form-label small mb-0" for="typeName">Root type / table name</label>
+                    <input class="form-control form-control-sm" id="typeName" placeholder="Root">
+
+                    <label class="form-label small mb-0 mt-2" for="indent">Indent</label>
+                    <select class="form-select form-select-sm" id="indent">
+                        <option value="2" selected>2 spaces</option>
+                        <option value="4">4 spaces</option>
+                        <option value="tab">Tab</option>
+                    </select>
+
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="skeletonTyped">
+                        <label class="form-check-label small" for="skeletonTyped">Typed JSON skeleton placeholders</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tsReadonly">
+                        <label class="form-check-label small" for="tsReadonly">TypeScript <code>readonly</code></label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tsExported" checked>
+                        <label class="form-check-label small" for="tsExported">TypeScript <code>export</code></label>
+                    </div>
+                </fieldset>
+            </div>
+
+            <div class="template-editor" id="templateEditor" hidden>
+                <h3 class="panel-title h6">Custom template</h3>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0" for="templateHeader">Header (once)</label>
+                        <textarea class="form-control form-control-sm code-area" id="templateHeader" rows="2"
+                            spellcheck="false" placeholder="// {{count}} keys"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-0" for="templateFooter">Footer (once)</label>
+                        <textarea class="form-control form-control-sm code-area" id="templateFooter" rows="2"
+                            spellcheck="false" placeholder="// generated from {{root}}"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-0" for="template">Line per key</label>
+                        <textarea class="form-control form-control-sm code-area" id="template" rows="2"
+                            spellcheck="false" placeholder="{{wrapped}}"></textarea>
                     </div>
                 </div>
+                <div class="template-tokens mt-2">
+                    <span class="text-body-secondary small">Header/footer:</span>
+                    <span id="summaryTokens"></span>
+                    <span class="text-body-secondary small ms-2">Per key:</span>
+                    <span id="keyTokens"></span>
+                </div>
+            </div>
+        </section>
 
+        <!-- -------------------------------------------------------------------- -->
+        <!-- Key tree                                                             -->
+        <!-- -------------------------------------------------------------------- -->
+        <section class="panel mt-3">
+            <div class="panel-head">
+                <h2 class="panel-title">Key tree</h2>
+                <span class="badge text-bg-secondary" id="selectionBadge">all keys</span>
+                <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+                    <label class="visually-hidden" for="treeSearch">Filter the tree</label>
+                    <input class="form-control form-control-sm w-auto" id="treeSearch" placeholder="filter tree">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="treeAllBtn">All</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="treeNoneBtn">None</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="treeLeavesBtn">Leaves</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="treeMatchBtn"
+                        title="Select everything matching the search box">Select matches</button>
+                </div>
+            </div>
+            <div class="tree-host" id="treeHost"></div>
+        </section>
+
+        <!-- -------------------------------------------------------------------- -->
+        <!-- Compare                                                              -->
+        <!-- -------------------------------------------------------------------- -->
+        <section class="panel mt-3">
+            <div class="panel-head">
+                <h2 class="panel-title">Compare with another document</h2>
+                <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+                    <label class="visually-hidden" for="compareInput">Second JSON document</label>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="compareFromOutputBtn"
+                        title="Copy the current input into the compare box">Use current input</button>
+                    <span class="btn-group btn-group-sm" role="group" aria-label="Comparison mode">
+                        <button class="btn btn-outline-secondary" type="button" data-compare="union">Union</button>
+                        <button class="btn btn-outline-secondary" type="button"
+                            data-compare="intersection">Shared</button>
+                        <button class="btn btn-outline-secondary" type="button" data-compare="only-a">Only A</button>
+                        <button class="btn btn-outline-secondary" type="button" data-compare="only-b">Only B</button>
+                    </span>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="compareCopyBtn">Copy</button>
+                </div>
+            </div>
+            <div class="row g-2">
+                <div class="col-lg-5">
+                    <textarea class="form-control code-area" id="compareInput" rows="6" spellcheck="false"
+                        placeholder="Paste a second JSON document to compare key paths with the first one"></textarea>
+                </div>
+                <div class="col-lg-7">
+                    <pre class="code-output compare-output" id="compareOutput"
+                        aria-live="polite">Paste a second document to see the union, the shared keys and the differences.</pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ---------------------------------------------------------------------- -->
+    <!-- Shortcuts modal                                                        -->
+    <!-- ---------------------------------------------------------------------- -->
+    <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="shortcutsTitle">Keyboard shortcuts</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="shortcut-list mb-0">
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></dt>
+                        <dd>Focus the JSON input</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd></dt>
+                        <dd>Render now (it also happens automatically as you type)</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></dt>
+                        <dd>Copy the output</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></dt>
+                        <dd>Format the input</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>K</kbd></dt>
+                        <dd>Clear both areas</dd>
+                        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>/</kbd></dt>
+                        <dd>Open this help</dd>
+                    </dl>
+                </div>
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
-        crossorigin="anonymous"></script>
-    <script src="index.js"></script>
+
+    <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
+
+    <input type="file" id="fileInput" accept=".json,.ndjson,.jsonl,.txt,application/json" hidden>
+
+    <footer class="app-footer">
+        <div class="container-xxl d-flex flex-wrap gap-3 align-items-center">
+            <span>Nothing leaves this tab — no upload, no analytics.</span>
+            <a class="ms-auto" href="https://github.com/Kba05/KeysFromJSON" rel="noopener">Source on GitHub</a>
+        </div>
+    </footer>
+
+    <script type="module" src="/src/main.js"></script>
 </body>
 
 </html>

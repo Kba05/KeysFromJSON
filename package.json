@@ -1,0 +1,34 @@
+{
+  "name": "keys-from-json",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pull every key out of a JSON document and turn it into the code you actually need: a quoted list, key paths, TypeScript types, SQL columns and more. Runs entirely in the browser.",
+  "keywords": [
+    "json",
+    "keys",
+    "developer-tools",
+    "typescript",
+    "jsonpath"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/",
+    "test:fast": "node --test --experimental-test-isolation=none \"tests/*.test.js\"",
+    "test:watch": "node --test --watch tests/",
+    "check:formats": "node scripts/check-formatters.mjs",
+    "check:dom": "node scripts/check-dom.mjs",
+    "check:build": "node scripts/check-build.mjs",
+    "check": "npm test && npm run check:formats && npm run check:dom"
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.3"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "vite": "^5.4.11"
+  }
+}
