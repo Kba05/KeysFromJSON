@@ -36,17 +36,18 @@ pnpm check:build
 - Precise parse diagnostics and one-click repair for recoverable mistakes
 - 36 output formats: key lists, path notations, TypeScript, Zod, JSON Schema, SQL, language models, templates, and more
 - Filtering, sorting, case conversion, wrappers, de-duplication, regular expressions, and stable path-based selection
-- Tri-state tree selection with a 4,000-field rendering limit
+- The main workspace pairs equal-height `JSON input` and `Output` cards; settings sit at the top of Output before its format and actions, and never affect the source JSON, Tree, or Graph
+- Tri-state tree selection; large documents show the first 4,000 unique paths, start collapsed, and cap visible siblings so the browser stays responsive
 - Read-only graph view with pan, zoom, minimap, controls, type colors, and Dagre layout
 - Document comparison: union, shared paths, only A, and only B
 - Local history, theme persistence, compatible share links, keyboard shortcuts, drag-and-drop, and file export
 - Installable PWA with offline caching
 
-Live rendering uses a 160 ms debounce and pauses automatically for inputs larger than 1,500,000 characters.
+Live editing uses a 160 ms debounce. Files larger than 1,500,000 characters are analyzed automatically after loading with a blocking progress overlay, while the editor shows a short preview instead of mounting the complete multi-megabyte string. Output settings continue to re-render an already analyzed large document.
 
 ## JSON graph
 
-The `Tree / Graph` tabs show two independent views of the parsed source. The graph always represents the original JSON and is not affected by formatter filters or tree selection.
+The `Tree / Graph` tabs show two independent views of the source. The graph always represents the original JSON and is not affected by formatter filters or tree selection. Opening the Graph tab does no expensive work: the user starts generation explicitly with **Build graph**.
 
 - Objects, arrays, and primitives use separate node types.
 - Edges show object keys or array indexes.
@@ -54,7 +55,8 @@ The `Tree / Graph` tabs show two independent views of the parsed source. The gra
 - Node IDs use the document number and an escaped JSON Pointer path.
 - String previews are shortened to 80 characters without changing source data.
 - Rendering is capped at 1,000 real nodes. Omitted branches are represented by summary nodes and a warning.
-- Layout is calculated only for valid JSON when the Graph tab is open.
+- Parsing and Dagre layout run in a Web Worker after the explicit build action, with a blocking progress overlay while it works.
+- Editing or replacing the JSON marks the previous graph as stale and requires **Build updated graph**; switching tabs keeps a current graph in transient memory.
 
 ## Output formats
 

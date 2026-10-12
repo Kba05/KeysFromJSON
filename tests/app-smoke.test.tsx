@@ -16,7 +16,8 @@ vi.mock('@xyflow/react', () => ({
 
 import App from '../src/App';
 import { buildSchema } from '../src/core/schema';
-import { LIVE_INPUT_LIMIT, useAppStore } from '../src/store/app-store';
+import { jsonToGraph } from '../src/graph/json-to-graph';
+import { LIVE_INPUT_LIMIT, TREE_FIELD_LIMIT, useAppStore } from '../src/store/app-store';
 import { pushHistory } from '../src/ui/history';
 import { DEFAULT_OPTIONS } from '../src/ui/state';
 
@@ -26,14 +27,24 @@ const resetStore = () => {
   useAppStore.setState({
     input: '', compareInput: '', options: { ...DEFAULT_OPTIONS }, theme: 'light', selectedPaths: null,
     collapsedPaths: new Set(), analysisTab: 'tree', compareMode: 'union', tooLargeForLive: false, sampleIndex: 0,
-    docs: [], fields: [], tree: null, schema: buildSchema([]), items: [],
+    graphModel: null, graphSource: null,
+    docs: [], fields: [], tree: null, treeTruncated: false, treePathCount: 0, schema: buildSchema([]), items: [],
     stats: { scanned: 0, matched: 0, unique: 0, duplicates: 0, maxDepth: 0 },
-    errors: { include: null, exclude: null }, output: '', outputError: null, parseError: null, format: null,
+    errors: { include: null, exclude: null }, output: '', outputError: null, parseError: null, format: null, analysisSource: null,
   });
 };
 
-beforeEach(resetStore);
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+class GraphWorkerMock {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  postMessage(): void {
+    queueMicrotask(() => this.onmessage?.({ data: { ok: true, model: jsonToGraph([{ mock: true }]) } } as MessageEvent));
+  }
+  terminate(): void {}
+}
+
+beforeEach(() => { resetStore(); vi.stubGlobal('Worker', GraphWorkerMock); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function renderApp() {
   render(<App />);
@@ -45,6 +56,12 @@ describe('React application', () => {
     await renderApp();
     await waitFor(() => expect(document.getElementById('output')?.textContent).toContain('"id"'));
     expect(screen.getByText('Structure explorer')).toBeInTheDocument();
+    const inputHeading = screen.getByRole('heading', { name: 'JSON input' });
+    const settingsHeading = screen.getByRole('heading', { name: 'Output settings' });
+    const outputHeading = screen.getByRole('heading', { name: 'Output' });
+    const copyButton = screen.getAllByRole('button', { name: 'Copy' })[0];
+    expect(inputHeading.compareDocumentPosition(outputHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(settingsHeading.compareDocumentPosition(copyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test('reports invalid JSON with a location', async () => {
@@ -71,8 +88,14 @@ describe('React application', () => {
   test('switches between tree and graph views', async () => {
     await renderApp();
     await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+    expect(await screen.findByText('Graph has not been built yet')).toBeInTheDocument();
+    expect(screen.queryByTestId('json-graph')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Build graph' }));
     expect(await screen.findByTestId('json-graph')).toBeInTheDocument();
     expect(screen.getByTestId('flow-canvas')).toHaveTextContent(/nodes/);
+    fireEvent.change(screen.getByLabelText('JSON input'), { target: { value: '{"changed":true}' } });
+    expect(screen.queryByTestId('json-graph')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Build updated graph' })).toBeInTheDocument();
   });
 
   test('toggles the document theme', async () => {
@@ -131,12 +154,32 @@ describe('React application', () => {
     await waitFor(() => expect(document.getElementById('output')?.textContent).toContain('1=id'));
   });
 
-  test('pauses live rendering for very large input', async () => {
+  test('loads a very large file without mounting its full text in the editor', async () => {
     await renderApp();
     const huge = `{"value":"${'x'.repeat(LIVE_INPUT_LIMIT)}"}`;
-    fireEvent.change(screen.getByLabelText('JSON input'), { target: { value: huge } });
-    expect(await screen.findByText(/Live rendering paused/)).toBeInTheDocument();
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    const file = new File([huge], 'large.json', { type: 'application/json' });
+    fireEvent.change(fileInput!, { target: { files: [file] } });
+    expect(await screen.findByText('Large JSON loaded')).toBeInTheDocument();
     expect(useAppStore.getState().tooLargeForLive).toBe(true);
+    await waitFor(() => expect(document.getElementById('output')).toHaveTextContent('"value"'));
+    expect(screen.getByText(/Large document analyzed/)).toBeInTheDocument();
+    expect(screen.getByLabelText('JSON input')).not.toBeInstanceOf(HTMLTextAreaElement);
+  });
+
+  test('keeps an oversized tree usable with a visible path limit', async () => {
+    await renderApp();
+    const documentWithManyPaths = Object.fromEntries(Array.from({ length: TREE_FIELD_LIMIT + 2 }, (_, index) => [`key_${index}`, index]));
+    act(() => {
+      useAppStore.getState().setInput(JSON.stringify(documentWithManyPaths));
+      useAppStore.getState().run(false);
+    });
+    expect(useAppStore.getState().tree).not.toBeNull();
+    expect(useAppStore.getState().treeTruncated).toBe(true);
+    expect(useAppStore.getState().treePathCount).toBe(TREE_FIELD_LIMIT + 2);
+    expect(await screen.findByText((content) => content.includes('Showing the first 4,000'))).toBeInTheDocument();
+    expect(screen.getByText(/more root branches hidden/)).toBeInTheDocument();
   });
 
   test('restores the latest compatible history entry', async () => {

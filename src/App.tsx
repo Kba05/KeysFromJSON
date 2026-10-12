@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type * as React from 'react';
 import {
   Braces, Check, Clipboard, Code2, Download, FileJson, Github, History, Keyboard, Link2,
-  Moon, RotateCcw, Save, Sun, Upload, WandSparkles, X,
+  LoaderCircle, Moon, RotateCcw, Save, SlidersHorizontal, Sun, Upload, WandSparkles, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,12 +35,19 @@ import {
 import { buildShareUrl, clearLocationState, readLocationState } from '@/ui/share';
 import { DEFAULT_OPTIONS, type AppOptions } from '@/ui/state';
 import { comparePathSets, pathSetOf, renderComparison, type CompareMode } from '@/ui/diff';
-import { useAppStore } from '@/store/app-store';
+import { LIVE_INPUT_LIMIT, useAppStore } from '@/store/app-store';
 
 type OptionKey = keyof AppOptions;
 interface Choice { value: string; label: string }
 
 const JsonGraph = lazy(() => import('@/components/json-graph').then((module) => ({ default: module.JsonGraph })));
+
+function lineCountOf(text: string): number {
+  if (!text) return 0;
+  let count = 1;
+  for (let index = 0; index < text.length; index += 1) if (text.charCodeAt(index) === 10) count += 1;
+  return count;
+}
 
 async function copyText(text: string, label = 'Text'): Promise<void> {
   if (!text) { toast.warning(`Nothing to copy from ${label.toLowerCase()}`); return; }
@@ -121,6 +128,7 @@ function InputCard() {
   const format = useAppStore((state) => state.format);
   const docs = useAppStore((state) => state.docs);
   const fields = useAppStore((state) => state.fields);
+  const analysisSource = useAppStore((state) => state.analysisSource);
   const setInput = useAppStore((state) => state.setInput);
   const setOption = useAppStore((state) => state.setOption);
   const run = useAppStore((state) => state.run);
@@ -128,44 +136,74 @@ function InputCard() {
   const nextSample = useAppStore((state) => state.nextSample);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [showLargeEditor, setShowLargeEditor] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [loadedFile, setLoadedFile] = useState<{ name: string; bytes: number } | null>(null);
+  const lineCount = useMemo(() => lineCountOf(input), [input]);
 
-  const formatInput = () => {
+  const analyzeNow = async (): Promise<void> => {
+    setBusyLabel('Analyzing the complete JSON…');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    try { useAppStore.getState().run(); }
+    finally { setBusyLabel(null); }
+  };
+
+  const applyTransformedInput = async (text: string, message: string): Promise<void> => {
+    setInput(text);
+    if (text.length > LIVE_INPUT_LIMIT) await analyzeNow();
+    toast.success(message);
+  };
+  const formatInput = async () => {
     const parsed = parseDocuments(input, { mode: options.inputMode });
     if (!parsed.ok) { toast.error(`Cannot format: ${parsed.error.message}`); return; }
     const indent = options.indent === 'tab' ? 'tab' : Number(options.indent);
-    setInput(parsed.docs.length === 1 ? stringifyJson(parsed.docs[0], indent) : parsed.docs.map((doc) => stringifyJson(doc, indent)).join('\n'));
-    toast.success('Input formatted');
+    await applyTransformedInput(parsed.docs.length === 1 ? stringifyJson(parsed.docs[0], indent) : parsed.docs.map((doc) => stringifyJson(doc, indent)).join('\n'), 'Input formatted');
   };
-  const minify = () => {
+  const minify = async () => {
     const parsed = parseDocuments(input, { mode: options.inputMode });
     if (!parsed.ok) { toast.error(`Cannot minify: ${parsed.error.message}`); return; }
-    setInput(parsed.docs.map((doc) => JSON.stringify(doc)).join('\n')); toast.success('Input minified');
+    await applyTransformedInput(parsed.docs.map((doc) => JSON.stringify(doc)).join('\n'), 'Input minified');
   };
-  const repair = () => {
+  const repair = async () => {
     const result = repairJson(input, options.indent === 'tab' ? 2 : Number(options.indent));
     if (!result.ok) { toast.error(`Could not repair: ${result.error.message}`); return; }
-    setInput(result.text); toast.success('JSON repaired');
+    await applyTransformedInput(result.text, 'JSON repaired');
   };
   const openFiles = async (files: FileList | File[]) => {
-    const result = await filesToText(files);
-    if (result.error) { toast.error(result.error); return; }
-    setInput(result.text); toast.success(result.names.length === 1 ? `Loaded ${result.names[0]}` : `Loaded ${result.names.length} files as JSON Lines`);
+    const list = [...files];
+    setBusyLabel(list.length === 1 ? `Reading ${list[0].name}…` : `Reading ${list.length} files…`);
+    const result = await filesToText(list);
+    if (result.error) { setBusyLabel(null); toast.error(result.error); return; }
+    setLoadedFile(list.length === 1 ? { name: list[0].name, bytes: list[0].size } : null);
+    setShowLargeEditor(false);
+    setInput(result.text);
+    if (result.text.length > LIVE_INPUT_LIMIT) {
+      await analyzeNow();
+      toast.success(result.names.length === 1 ? `Loaded and analyzed ${result.names[0]}` : `Loaded and analyzed ${result.names.length} files`);
+    } else {
+      setBusyLabel(null);
+      toast.success(result.names.length === 1 ? `Loaded ${result.names[0]}` : `Loaded ${result.names.length} files as JSON Lines`);
+    }
   };
 
-  return <Card className="flex min-h-[520px] flex-col">
+  return <Card className="flex h-full min-h-[520px] flex-col">
     <CardHeader className="gap-3"><div className="flex flex-wrap items-center gap-2"><div><CardTitle>JSON input</CardTitle><CardDescription>Paste, drop, or open JSON and NDJSON files.</CardDescription></div><div className="ml-auto flex flex-wrap gap-2">
       <ChoiceSelect value={options.inputMode} onChange={(value) => setOption('inputMode', value as AppOptions['inputMode'])} choices={[{ value: 'auto', label: 'Auto-detect' }, { value: 'json', label: 'JSON only' }, { value: 'ndjson', label: 'NDJSON' }, { value: 'relaxed', label: 'Relaxed' }]} />
-      <ToolbarButton label="Format" data-action="format" onClick={formatInput}><WandSparkles /></ToolbarButton><ToolbarButton label="Minify" onClick={minify}><Code2 /></ToolbarButton><ToolbarButton label="Sample" onClick={() => toast.info(`Loaded ${nextSample()}`)}><FileJson /></ToolbarButton><ToolbarButton label="Open" onClick={() => fileRef.current?.click()}><Upload /></ToolbarButton><ToolbarButton label="Clear" onClick={clear}><X /></ToolbarButton>
+      <ToolbarButton label="Format" data-action="format" onClick={() => void formatInput()}><WandSparkles /></ToolbarButton><ToolbarButton label="Minify" onClick={() => void minify()}><Code2 /></ToolbarButton><ToolbarButton label="Sample" onClick={() => toast.info(`Loaded ${nextSample()}`)}><FileJson /></ToolbarButton><ToolbarButton label="Open" onClick={() => fileRef.current?.click()}><Upload /></ToolbarButton><ToolbarButton label="Clear" onClick={clear}><X /></ToolbarButton>
     </div></div></CardHeader>
     <CardContent className="flex flex-1 flex-col gap-3">
-      {parseError && <Alert className="border-destructive/50 bg-destructive/10"><AlertTitle>{parseError.message}</AlertTitle><AlertDescription><div>Line {parseError.line}, column {parseError.column}{failedLine ? ` · NDJSON line ${failedLine}` : ''}</div><pre className="mt-2 overflow-x-auto rounded bg-background/70 p-2 font-mono text-xs">{parseError.snippet}{'\n'}{parseError.caret}</pre>{parseError.repairable && <Button variant="destructive" size="sm" className="mt-3" onClick={repair}>Repair JSON</Button>}</AlertDescription></Alert>}
+      {parseError && <Alert className="border-destructive/50 bg-destructive/10"><AlertTitle>{parseError.message}</AlertTitle><AlertDescription><div>Line {parseError.line}, column {parseError.column}{failedLine ? ` · NDJSON line ${failedLine}` : ''}</div><pre className="mt-2 overflow-x-auto rounded bg-background/70 p-2 font-mono text-xs">{parseError.snippet}{'\n'}{parseError.caret}</pre>{parseError.repairable && <Button variant="destructive" size="sm" className="mt-3" onClick={() => void repair()}>Repair JSON</Button>}</AlertDescription></Alert>}
       <div className={`relative flex-1 rounded-lg ${dragging ? 'ring-2 ring-primary' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files.length) void openFiles(event.dataTransfer.files); }}>
-        <Textarea id="jsonInput" aria-label="JSON input" value={input} onChange={(event) => setInput(event.target.value)} spellCheck={false} className="h-full min-h-[340px] resize-y font-mono text-[13px] leading-relaxed" placeholder={'Paste JSON here, or drop a file\n\n{ "user": { "id": 1, "name": "Ada" } }'} />
+        {tooLarge && !showLargeEditor ? <div id="jsonInput" tabIndex={0} aria-label="JSON input" className="flex h-full min-h-[340px] flex-col overflow-hidden rounded-lg border bg-code">
+          <div className="flex flex-wrap items-start gap-3 border-b bg-background/70 p-4"><FileJson className="mt-0.5 size-5 shrink-0 text-primary" /><div className="min-w-0 flex-1"><div className="font-medium">Large JSON loaded</div><div className="mt-1 text-sm text-muted-foreground">{loadedFile?.name ?? 'Pasted JSON'} · {loadedFile ? `${(loadedFile.bytes / 1_000_000).toFixed(1)} MB` : `${(input.length / 1_000_000).toFixed(1)}M characters`} · {lineCount.toLocaleString()} lines</div><div className="mt-2 text-sm text-muted-foreground">The full editor is disabled to keep this page responsive. Analysis, Output, Tree, and Graph still use the complete document.</div></div><div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => void analyzeNow()}><WandSparkles />{analysisSource === input ? 'Analyze again' : 'Analyze JSON'}</Button><Button variant="outline" size="sm" onClick={() => setShowLargeEditor(true)}>Open full editor</Button></div></div>
+          <pre className="flex-1 overflow-hidden whitespace-pre-wrap break-all p-4 font-mono text-xs text-muted-foreground">{input.slice(0, 12_000)}{input.length > 12_000 ? '\n\n… preview truncated …' : ''}</pre>
+        </div> : <Textarea id="jsonInput" aria-label="JSON input" value={input} onChange={(event) => { setLoadedFile(null); setInput(event.target.value); }} spellCheck={false} className="h-full min-h-[340px] resize-y font-mono text-[13px] leading-relaxed" placeholder={'Paste JSON here, or drop a file\n\n{ "user": { "id": 1, "name": "Ada" } }'} />}
         {dragging && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg bg-primary/10 text-sm font-medium">Drop JSON files here</div>}
       </div>
       <input ref={fileRef} type="file" accept=".json,.ndjson,.jsonl,.txt,application/json" multiple hidden onChange={(event) => { if (event.target.files?.length) void openFiles(event.target.files); event.target.value = ''; }} />
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{input.length.toLocaleString()} characters</span>{input.includes('\n') && <span>{input.split('\n').length.toLocaleString()} lines</span>}{format === 'ndjson' && <span>NDJSON</span>}{docs.length > 1 && <span>{docs.length} documents</span>}{fields.length > 0 && <span>{fields.length.toLocaleString()} keys</span>}{tooLarge && <button className="font-medium text-amber-600" onClick={() => run()}>Live rendering paused — render now</button>}</div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{input.length.toLocaleString()} characters</span>{lineCount > 1 && <span>{lineCount.toLocaleString()} lines</span>}{format === 'ndjson' && <span>NDJSON</span>}{docs.length > 1 && <span>{docs.length} documents</span>}{fields.length > 0 && <span>{fields.length.toLocaleString()} key occurrences</span>}{tooLarge && <span className="font-medium text-amber-600">{analysisSource === input ? 'Large document analyzed · live input rendering paused' : 'Large document waiting for analysis'}</span>}</div>
     </CardContent>
+    {busyLabel && <div className="fixed inset-0 z-[100] grid place-items-center bg-background/80 p-6 backdrop-blur-sm" role="status" aria-live="assertive"><div className="rounded-xl border bg-card px-8 py-7 text-center shadow-2xl"><LoaderCircle className="mx-auto size-10 animate-spin text-primary" /><div className="mt-4 text-lg font-semibold">{busyLabel}</div><div className="mt-1 text-sm text-muted-foreground">This stays on your device.</div></div></div>}
   </Card>;
 }
 
@@ -182,15 +220,15 @@ function OutputCard() {
     if (result.error) { toast.error(result.error); return; }
     window.history.replaceState(null, '', result.url); await copyText(result.url, 'Link');
   };
-  return <Card className="flex min-h-[520px] flex-col"><CardHeader className="gap-3"><div className="flex flex-wrap items-center gap-2"><div><CardTitle>Output</CardTitle><CardDescription>{formatter?.hint ?? 'Choose an output format.'}</CardDescription></div><div className="ml-auto flex flex-wrap gap-2">
-    <Select value={options.formatId} onValueChange={(value) => setOption('formatId', value)}><SelectTrigger id="formatSelect" className="w-52"><SelectValue /></SelectTrigger><SelectContent>{groups.map((group) => <SelectGroup key={group.id}><SelectLabel>{group.label}</SelectLabel>{group.formatters.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectGroup>)}</SelectContent></Select>
-    <Button size="sm" onClick={() => void copyText(output, 'Output')}><Clipboard />Copy</Button><ToolbarButton label="Save" onClick={() => output ? downloadText(suggestedFilename(options.formatId, options.typeName), output) : toast.warning('Nothing to save yet')}><Save /></ToolbarButton><ToolbarButton label="Link" onClick={() => void share()}><Link2 /></ToolbarButton>
-  </div></div></CardHeader><CardContent className="flex flex-1 flex-col gap-3">{outputError && <Alert className="border-destructive/50 text-destructive"><AlertTitle>Formatter error</AlertTitle><AlertDescription>{outputError}</AlertDescription></Alert>}<pre id="output" tabIndex={0} className="min-h-[340px] flex-1 overflow-auto whitespace-pre rounded-lg border bg-code p-4 font-mono text-[13px] leading-relaxed" aria-live="polite">{output}</pre><div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{formatter?.label}</span>{stats.scanned > 0 && <span>{stats.unique.toLocaleString()} in output</span>}{stats.duplicates > 0 && <span>{stats.duplicates.toLocaleString()} duplicates removed</span>}{stats.matched !== stats.scanned && <span>{stats.matched.toLocaleString()} of {stats.scanned.toLocaleString()} matched</span>}</div></CardContent></Card>;
+  return <Card className="flex h-full min-h-[520px] flex-col"><CardHeader><CardTitle>Output</CardTitle><CardDescription>{formatter?.hint ?? 'Choose an output format.'}</CardDescription></CardHeader><CardContent className="flex flex-1 flex-col gap-3">
+    <OutputSettings />
+    <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-3"><OptionField label="Output format" htmlFor="formatSelect"><Select value={options.formatId} onValueChange={(value) => setOption('formatId', value)}><SelectTrigger id="formatSelect" className="w-52"><SelectValue /></SelectTrigger><SelectContent>{groups.map((group) => <SelectGroup key={group.id}><SelectLabel>{group.label}</SelectLabel>{group.formatters.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectGroup>)}</SelectContent></Select></OptionField><div className="ml-auto flex flex-wrap gap-2"><Button size="sm" onClick={() => void copyText(output, 'Output')}><Clipboard />Copy</Button><ToolbarButton label="Save" onClick={() => output ? downloadText(suggestedFilename(options.formatId, options.typeName), output) : toast.warning('Nothing to save yet')}><Save /></ToolbarButton><ToolbarButton label="Link" onClick={() => void share()}><Link2 /></ToolbarButton></div></div>
+    {outputError && <Alert className="border-destructive/50 text-destructive"><AlertTitle>Formatter error</AlertTitle><AlertDescription>{outputError}</AlertDescription></Alert>}<pre id="output" tabIndex={0} className="min-h-[340px] flex-1 overflow-auto whitespace-pre rounded-lg border bg-code p-4 font-mono text-[13px] leading-relaxed" aria-live="polite">{output}</pre><div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{formatter?.label}</span>{stats.scanned > 0 && <span>{stats.unique.toLocaleString()} in output</span>}{stats.duplicates > 0 && <span>{stats.duplicates.toLocaleString()} duplicates removed</span>}{stats.matched !== stats.scanned && <span>{stats.matched.toLocaleString()} of {stats.scanned.toLocaleString()} matched</span>}</div></CardContent></Card>;
 }
 
 function OptionField({ label, children, htmlFor }: { label: string; children: React.ReactNode; htmlFor?: string }) { return <div className="space-y-1.5"><Label htmlFor={htmlFor}>{label}</Label>{children}</div>; }
 
-function OptionsCard() {
+function OutputSettings() {
   const options = useAppStore((state) => state.options);
   const errors = useAppStore((state) => state.errors);
   const setOption = useAppStore((state) => state.setOption);
@@ -198,15 +236,15 @@ function OptionsCard() {
   const update = <K extends OptionKey>(key: K) => (value: string) => setOption(key, value as AppOptions[K]);
   const check = <K extends OptionKey>(key: K) => (value: boolean | 'indeterminate') => setOption(key, (value === true) as AppOptions[K]);
   const groups = [
-    { id: 'wrapper', title: 'Key wrapper', content: <div className="grid gap-4 md:grid-cols-2"><RadioGroup value={options.wrapperMode} onValueChange={(value) => setOption('wrapperMode', value as AppOptions['wrapperMode'])} className="flex gap-4"><div className="flex items-center gap-2"><RadioGroupItem id="wrapper-preset" value="preset" /><Label htmlFor="wrapper-preset">Preset</Label></div><div className="flex items-center gap-2"><RadioGroupItem id="wrapper-custom" value="custom" /><Label htmlFor="wrapper-custom">Custom</Label></div></RadioGroup><ChoiceSelect value={options.wrapperPresetId} onChange={update('wrapperPresetId')} choices={WRAPPER_PRESETS.map(({ id, label }) => ({ value: id, label }))} /><OptionField label="Left"><Input value={options.wrapperLeft} disabled={options.wrapperMode !== 'custom'} onChange={(event) => setOption('wrapperLeft', event.target.value)} /></OptionField><OptionField label="Right"><Input value={options.wrapperRight} disabled={options.wrapperMode !== 'custom' || options.wrapperMirror} onChange={(event) => setOption('wrapperRight', event.target.value)} /></OptionField><label className="flex items-center gap-2 text-sm"><Checkbox checked={options.wrapperMirror} disabled={options.wrapperMode !== 'custom'} onCheckedChange={check('wrapperMirror')} />Auto-close or mirror left</label></div> },
-    { id: 'names', title: 'Names, paths & ordering', content: <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><OptionField label="Name source"><ChoiceSelect value={options.nameSource} onChange={update('nameSource')} choices={NAME_SOURCE_OPTIONS} /></OptionField><OptionField label="Case"><ChoiceSelect value={options.caseMode} onChange={update('caseMode')} choices={CASE_OPTIONS} /></OptionField><OptionField label="Separator"><ChoiceSelect value={options.separator} onChange={update('separator')} choices={SEPARATOR_OPTIONS} /></OptionField><OptionField label="Sort"><ChoiceSelect value={options.sortMode} onChange={update('sortMode')} choices={SORT_OPTIONS} /></OptionField><OptionField label="Path notation"><ChoiceSelect value={options.pathStyle} onChange={update('pathStyle')} choices={PATH_STYLE_OPTIONS} /><p className="text-xs text-muted-foreground">{PATH_STYLE_EXAMPLES[options.pathStyle]}</p></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.realIndices} onCheckedChange={check('realIndices')} />Use real array indices</label></div> },
-    { id: 'filtering', title: 'Filtering & patterns', content: <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><OptionField label="Node filter"><ChoiceSelect value={options.nodeFilter} onChange={update('nodeFilter')} choices={NODE_FILTER_OPTIONS} /></OptionField><OptionField label="Max depth"><Input type="number" min={0} value={options.maxDepth} onChange={(event) => setOption('maxDepth', event.target.value)} placeholder="Unlimited" /></OptionField><OptionField label="De-duplicate by"><ChoiceSelect value={options.dedupeBy} onChange={update('dedupeBy')} choices={DEDUPE_OPTIONS} /></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.ignoreCase} onCheckedChange={check('ignoreCase')} />Ignore case</label><OptionField label="Substring"><Input value={options.search} onChange={(event) => setOption('search', event.target.value)} placeholder="Filter key list" /></OptionField><OptionField label="Include regex"><Input value={options.includePattern} onChange={(event) => setOption('includePattern', event.target.value)} placeholder="^user_" />{errors.include && <p className="text-xs text-destructive">{errors.include}</p>}</OptionField><OptionField label="Exclude regex"><Input value={options.excludePattern} onChange={(event) => setOption('excludePattern', event.target.value)} placeholder="_meta$" />{errors.exclude && <p className="text-xs text-destructive">{errors.exclude}</p>}</OptionField></div> },
-    { id: 'generated', title: 'Generated code', content: <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><OptionField label="Root type / table name"><Input value={options.typeName} onChange={(event) => setOption('typeName', event.target.value)} /></OptionField><OptionField label="Indent"><ChoiceSelect value={options.indent} onChange={update('indent')} choices={INDENT_OPTIONS} /></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.skeletonTyped} onCheckedChange={check('skeletonTyped')} />Typed placeholders</label><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.tsReadonly} onCheckedChange={check('tsReadonly')} />TypeScript readonly</label><label className="flex items-center gap-2 text-sm"><Checkbox checked={options.tsExported} onCheckedChange={check('tsExported')} />Export TypeScript declarations</label></div> },
+    { id: 'wrapper', title: 'Key wrapper', content: <div className="grid gap-4 sm:grid-cols-2"><RadioGroup value={options.wrapperMode} onValueChange={(value) => setOption('wrapperMode', value as AppOptions['wrapperMode'])} className="flex gap-4"><div className="flex items-center gap-2"><RadioGroupItem id="wrapper-preset" value="preset" /><Label htmlFor="wrapper-preset">Preset</Label></div><div className="flex items-center gap-2"><RadioGroupItem id="wrapper-custom" value="custom" /><Label htmlFor="wrapper-custom">Custom</Label></div></RadioGroup><ChoiceSelect value={options.wrapperPresetId} onChange={update('wrapperPresetId')} choices={WRAPPER_PRESETS.map(({ id, label }) => ({ value: id, label }))} /><OptionField label="Left"><Input value={options.wrapperLeft} disabled={options.wrapperMode !== 'custom'} onChange={(event) => setOption('wrapperLeft', event.target.value)} /></OptionField><OptionField label="Right"><Input value={options.wrapperRight} disabled={options.wrapperMode !== 'custom' || options.wrapperMirror} onChange={(event) => setOption('wrapperRight', event.target.value)} /></OptionField><label className="flex items-center gap-2 text-sm"><Checkbox checked={options.wrapperMirror} disabled={options.wrapperMode !== 'custom'} onCheckedChange={check('wrapperMirror')} />Auto-close or mirror left</label></div> },
+    { id: 'names', title: 'Names, paths & ordering', content: <div className="grid gap-4 sm:grid-cols-2"><OptionField label="Name source"><ChoiceSelect value={options.nameSource} onChange={update('nameSource')} choices={NAME_SOURCE_OPTIONS} /></OptionField><OptionField label="Case"><ChoiceSelect value={options.caseMode} onChange={update('caseMode')} choices={CASE_OPTIONS} /></OptionField><OptionField label="Separator"><ChoiceSelect value={options.separator} onChange={update('separator')} choices={SEPARATOR_OPTIONS} /></OptionField><OptionField label="Sort"><ChoiceSelect value={options.sortMode} onChange={update('sortMode')} choices={SORT_OPTIONS} /></OptionField><OptionField label="Path notation"><ChoiceSelect value={options.pathStyle} onChange={update('pathStyle')} choices={PATH_STYLE_OPTIONS} /><p className="text-xs text-muted-foreground">{PATH_STYLE_EXAMPLES[options.pathStyle]}</p></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.realIndices} onCheckedChange={check('realIndices')} />Use real array indices</label></div> },
+    { id: 'filtering', title: 'Filtering & patterns', content: <div className="grid gap-4 sm:grid-cols-2"><OptionField label="Node filter"><ChoiceSelect value={options.nodeFilter} onChange={update('nodeFilter')} choices={NODE_FILTER_OPTIONS} /></OptionField><OptionField label="Max depth"><Input type="number" min={0} value={options.maxDepth} onChange={(event) => setOption('maxDepth', event.target.value)} placeholder="Unlimited" /></OptionField><OptionField label="De-duplicate by"><ChoiceSelect value={options.dedupeBy} onChange={update('dedupeBy')} choices={DEDUPE_OPTIONS} /></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.ignoreCase} onCheckedChange={check('ignoreCase')} />Ignore case</label><OptionField label="Substring"><Input value={options.search} onChange={(event) => setOption('search', event.target.value)} placeholder="Filter key list" /></OptionField><OptionField label="Include regex"><Input value={options.includePattern} onChange={(event) => setOption('includePattern', event.target.value)} placeholder="^user_" />{errors.include && <p className="text-xs text-destructive">{errors.include}</p>}</OptionField><OptionField label="Exclude regex"><Input value={options.excludePattern} onChange={(event) => setOption('excludePattern', event.target.value)} placeholder="_meta$" />{errors.exclude && <p className="text-xs text-destructive">{errors.exclude}</p>}</OptionField></div> },
+    { id: 'generated', title: 'Generated code', content: <div className="grid gap-4 sm:grid-cols-2"><OptionField label="Root type / table name"><Input value={options.typeName} onChange={(event) => setOption('typeName', event.target.value)} /></OptionField><OptionField label="Indent"><ChoiceSelect value={options.indent} onChange={update('indent')} choices={INDENT_OPTIONS} /></OptionField><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.skeletonTyped} onCheckedChange={check('skeletonTyped')} />Typed placeholders</label><label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={options.tsReadonly} onCheckedChange={check('tsReadonly')} />TypeScript readonly</label><label className="flex items-center gap-2 text-sm"><Checkbox checked={options.tsExported} onCheckedChange={check('tsExported')} />Export TypeScript declarations</label></div> },
   ];
   const template = options.formatId === 'custom-template' || options.formatId === 'template-list';
-  return <Card><CardHeader className="flex-row items-center"><div><CardTitle>Options</CardTitle><CardDescription>Transform and filter keys without touching the input.</CardDescription></div><Button variant="outline" size="sm" className="ml-auto" onClick={() => { resetOptions(); toast.info('Options reset'); }}><RotateCcw />Reset</Button></CardHeader><CardContent><Accordion type="multiple" defaultValue={['names']} className="w-full">{groups.map((group) => <AccordionItem key={group.id} value={group.id}><AccordionTrigger>{group.title}</AccordionTrigger><AccordionContent>{group.content}</AccordionContent></AccordionItem>)}</Accordion>
+  return <section className="rounded-lg border border-primary/30 bg-primary/[0.03]"><div className="flex flex-wrap items-start gap-3 p-4"><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><SlidersHorizontal className="size-4" /></div><div className="min-w-0 flex-1"><div className="mb-1 flex flex-wrap items-center gap-2"><h3 className="font-semibold leading-none">Output settings</h3><Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">Applied below ↓</Badge></div><p className="text-sm text-muted-foreground">Choose how the JSON is converted. Tree and Graph stay unchanged.</p></div><Button variant="outline" size="sm" onClick={() => { resetOptions(); toast.info('Output settings reset'); }}><RotateCcw />Reset</Button></div><div className="border-t px-4 pb-2"><Accordion type="multiple" defaultValue={['names']} className="w-full">{groups.map((group) => <AccordionItem key={group.id} value={group.id}><AccordionTrigger>{group.title}</AccordionTrigger><AccordionContent>{group.content}</AccordionContent></AccordionItem>)}</Accordion>
     {template && <div className="mt-5 grid gap-4 rounded-lg border bg-muted/20 p-4 md:grid-cols-2"><OptionField label="Header"><Textarea value={options.templateHeader} onChange={(event) => setOption('templateHeader', event.target.value)} className="font-mono" /></OptionField><OptionField label="Footer"><Textarea value={options.templateFooter} onChange={(event) => setOption('templateFooter', event.target.value)} className="font-mono" /></OptionField><div className="md:col-span-2"><OptionField label="Line per key"><Textarea value={options.template} onChange={(event) => setOption('template', event.target.value)} className="font-mono" /></OptionField><div className="mt-2 flex flex-wrap gap-1">{[...SUMMARY_TOKENS, ...TEMPLATE_TOKENS].map((token) => <Badge variant="outline" key={`${token.token}-${token.description}`} className="font-mono">{'{{'}{token.token}{'}}'}</Badge>)}</div></div></div>}
-  </CardContent></Card>;
+  </div></section>;
 }
 
 function AnalysisCard() {
@@ -248,6 +286,7 @@ export default function App() {
   const options = useAppStore((state) => state.options);
   const selectedPaths = useAppStore((state) => state.selectedPaths);
   const tooLarge = useAppStore((state) => state.tooLargeForLive);
+  const analysisSource = useAppStore((state) => state.analysisSource);
   const theme = useAppStore((state) => state.theme);
   const output = useAppStore((state) => state.output);
   const run = useAppStore((state) => state.run);
@@ -255,12 +294,13 @@ export default function App() {
 
   useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark'); document.documentElement.style.colorScheme = theme; }, [theme]);
   useEffect(() => { if (tooLarge) return; const id = window.setTimeout(() => run(), 160); return () => window.clearTimeout(id); }, [input, options, selectedPaths, tooLarge, run]);
+  useEffect(() => { if (!tooLarge || analysisSource !== input) return; const id = window.setTimeout(() => run(false), 160); return () => window.clearTimeout(id); }, [options, selectedPaths]);
   useEffect(registerServiceWorker, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       const key = event.key.toLowerCase();
-      if (key === 'k' && !event.shiftKey) { event.preventDefault(); const inputElement = document.getElementById('jsonInput') as HTMLTextAreaElement | null; inputElement?.focus(); inputElement?.select(); }
+      if (key === 'k' && !event.shiftKey) { event.preventDefault(); const inputElement = document.getElementById('jsonInput'); inputElement?.focus(); if (inputElement instanceof HTMLTextAreaElement) inputElement.select(); }
       else if (key === 'enter') { event.preventDefault(); run(); }
       else if (key === 'c' && event.shiftKey) { event.preventDefault(); void copyText(output, 'Output'); }
       else if (key === 'k' && event.shiftKey) { event.preventDefault(); clear(); }
@@ -269,5 +309,5 @@ export default function App() {
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [clear, output, run]);
 
-  return <TooltipProvider delayDuration={300}><div className="min-h-svh bg-background text-foreground"><Header /><main className="mx-auto grid max-w-[1600px] gap-4 px-4 py-5 lg:px-6"><div className="grid gap-4 xl:grid-cols-2"><InputCard /><OutputCard /></div><OptionsCard /><AnalysisCard /><CompareCard /></main><footer className="border-t"><div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-5 text-sm text-muted-foreground lg:px-6"><span>Nothing leaves this tab — no upload, no analytics.</span><a className="ml-auto inline-flex items-center gap-2 hover:text-foreground" href="https://github.com/Kba05/KeysFromJSON" rel="noopener noreferrer"><Github className="size-4" />Source on GitHub</a></div></footer></div></TooltipProvider>;
+  return <TooltipProvider delayDuration={300}><div className="min-h-svh bg-background text-foreground"><Header /><main className="mx-auto grid max-w-[1600px] gap-4 px-4 py-5 lg:px-6"><div className="grid items-stretch gap-4 xl:grid-cols-2"><div className="h-full"><InputCard /></div><OutputCard /></div><AnalysisCard /><CompareCard /></main><footer className="border-t"><div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-5 text-sm text-muted-foreground lg:px-6"><span>Nothing leaves this tab — no upload, no analytics.</span><a className="ml-auto inline-flex items-center gap-2 hover:text-foreground" href="https://github.com/Kba05/KeysFromJSON" rel="noopener noreferrer"><Github className="size-4" />Source on GitHub</a></div></footer></div></TooltipProvider>;
 }

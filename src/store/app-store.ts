@@ -6,6 +6,7 @@ import { extractAll } from '@/core/extract';
 import { parseDocuments } from '@/core/json-parse';
 import { buildSchema } from '@/core/schema';
 import { renderFormat } from '@/formats';
+import type { GraphModel } from '@/graph/json-to-graph';
 import { SAMPLES } from '@/samples';
 import type { BuildStats, Field, JsonValue, KeyItem, ParseDiagnostic, SchemaNode } from '@/types';
 import { pushHistory, type HistoryEntry } from '@/ui/history';
@@ -20,6 +21,8 @@ export interface AnalysisState {
   docs: JsonValue[];
   fields: Field[];
   tree: TreeRoot | null;
+  treeTruncated: boolean;
+  treePathCount: number;
   schema: SchemaNode;
   items: KeyItem[];
   stats: BuildStats;
@@ -29,6 +32,7 @@ export interface AnalysisState {
   parseError: ParseDiagnostic | null;
   failedLine?: number;
   format: string | null;
+  analysisSource: string | null;
 }
 
 export interface AppStore extends AnalysisState {
@@ -41,6 +45,8 @@ export interface AppStore extends AnalysisState {
   analysisTab: 'tree' | 'graph';
   compareMode: 'union' | 'intersection' | 'only-a' | 'only-b';
   tooLargeForLive: boolean;
+  graphModel: GraphModel | null;
+  graphSource: string | null;
   sampleIndex: number;
   setInput: (input: string) => void;
   setCompareInput: (input: string) => void;
@@ -50,6 +56,7 @@ export interface AppStore extends AnalysisState {
   setTheme: (theme: 'light' | 'dark') => void;
   setAnalysisTab: (tab: 'tree' | 'graph') => void;
   setCompareMode: (mode: AppStore['compareMode']) => void;
+  setGraphResult: (model: GraphModel, source: string) => void;
   toggleTreeNode: (node: TreeNode) => void;
   toggleCollapsed: (path: string) => void;
   selectAll: () => void;
@@ -62,17 +69,52 @@ export interface AppStore extends AnalysisState {
 }
 
 const emptyAnalysis = (): AnalysisState => ({
-  docs: [], fields: [], tree: null, schema: buildSchema([]) as SchemaNode, items: [], stats: { ...EMPTY_STATS },
-  errors: { include: null, exclude: null }, output: '', outputError: null, parseError: null, format: null,
+  docs: [], fields: [], tree: null, treeTruncated: false, treePathCount: 0,
+  schema: buildSchema([]) as SchemaNode, items: [], stats: { ...EMPTY_STATS },
+  errors: { include: null, exclude: null }, output: '', outputError: null, parseError: null, format: null, analysisSource: null,
 });
+
+function limitedTreeOf(fields: Field[], caseMode: string): { tree: TreeRoot; treeTruncated: boolean; treePathCount: number } {
+  const seen = new Set<string>();
+  const visible: Field[] = [];
+  for (const field of fields) {
+    const path = pathKeyOf(field);
+    if (seen.has(path)) continue;
+    seen.add(path);
+    if (visible.length < TREE_FIELD_LIMIT) visible.push(field);
+  }
+  return {
+    tree: buildTree(visible, { caseMode }),
+    treeTruncated: seen.size > visible.length,
+    treePathCount: seen.size,
+  };
+}
+
+function collapsedContainersOf(tree: TreeRoot): Set<string> {
+  const collapsed = new Set<string>();
+  const pending = [...tree.children.values()];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node) continue;
+    if (node.children.size > 0) collapsed.add(node.pathKey);
+    pending.push(...node.children.values());
+  }
+  return collapsed;
+}
 
 export const useAppStore = create<AppStore>()(
   persist(
     (set, get) => ({
       input: '', compareInput: '', options: loadLegacyOptions(), theme: loadLegacyTheme(), selectedPaths: null,
-      collapsedPaths: new Set(), analysisTab: 'tree', compareMode: 'union', tooLargeForLive: false, sampleIndex: 0,
+      collapsedPaths: new Set(), analysisTab: 'tree', compareMode: 'union', tooLargeForLive: false,
+      graphModel: null, graphSource: null, sampleIndex: 0,
       ...emptyAnalysis(),
-      setInput: (input) => set({ input, tooLargeForLive: input.length > LIVE_INPUT_LIMIT }),
+      setInput: (input) => {
+        const tooLargeForLive = input.length > LIVE_INPUT_LIMIT;
+        set(tooLargeForLive
+          ? { input, tooLargeForLive, ...emptyAnalysis() }
+          : { input, tooLargeForLive });
+      },
       setCompareInput: (compareInput) => set({ compareInput }),
       setOption: (key, value) => set((state) => {
         const options = { ...state.options, [key]: value };
@@ -87,12 +129,15 @@ export const useAppStore = create<AppStore>()(
         const text = state.input;
         if (!text.trim()) { set({ ...emptyAnalysis() }); return; }
         const parsed = parseDocuments(text, { mode: state.options.inputMode });
-        if (!parsed.ok) { set({ ...emptyAnalysis(), parseError: parsed.error, failedLine: 'failedLine' in parsed ? parsed.failedLine : undefined }); return; }
+        if (!parsed.ok) { set({ ...emptyAnalysis(), analysisSource: text, parseError: parsed.error, failedLine: 'failedLine' in parsed ? parsed.failedLine : undefined }); return; }
 
         const docs = parsed.docs as JsonValue[];
         const fields = extractAll(docs) as Field[];
         const schema = buildSchema(docs) as SchemaNode;
-        const tree = fields.length <= TREE_FIELD_LIMIT ? buildTree(fields, { caseMode: state.options.caseMode }) : null;
+        const { tree, treeTruncated, treePathCount } = limitedTreeOf(fields, state.options.caseMode);
+        const collapsedPaths = treeTruncated && state.analysisSource !== text
+          ? collapsedContainersOf(tree)
+          : state.collapsedPaths;
         let selectedPaths = state.selectedPaths;
         let selectedIds: Set<number> | null = null;
         if (selectedPaths) {
@@ -102,13 +147,14 @@ export const useAppStore = create<AppStore>()(
         const engine = toEngineOptions(state.options, selectedIds);
         const built = buildKeyItems(fields, engine) as { items: KeyItem[]; stats: BuildStats; errors: AnalysisState['errors'] };
         const rendered = renderFormat(state.options.formatId, { fields, items: built.items, stats: built.stats, docs, schema, options: engine });
-        set({ docs, fields, schema, tree, selectedPaths, items: built.items, stats: built.stats, errors: built.errors,
-          output: rendered.text, outputError: rendered.error, parseError: null, failedLine: undefined, format: parsed.format });
+        set({ docs, fields, schema, tree, treeTruncated, treePathCount, collapsedPaths, selectedPaths, items: built.items, stats: built.stats, errors: built.errors,
+          output: rendered.text, outputError: rendered.error, parseError: null, failedLine: undefined, format: parsed.format, analysisSource: text });
         if (pushToHistory) pushHistory({ input: text, formatId: state.options.formatId, options: state.options });
       },
       setTheme: (theme) => set({ theme }),
       setAnalysisTab: (analysisTab) => set({ analysisTab }),
       setCompareMode: (compareMode) => set({ compareMode }),
+      setGraphResult: (graphModel, graphSource) => set({ graphModel, graphSource }),
       toggleTreeNode: (node) => {
         const state = get();
         const allPaths = state.fields.map(pathKeyOf);
@@ -127,14 +173,14 @@ export const useAppStore = create<AppStore>()(
         set((state) => ({ selectedPaths: new Set(state.fields.filter((field) => field.key.toLowerCase().includes(value)).map(pathKeyOf)) }));
         return true;
       },
-      restoreHistory: (entry) => set({ input: entry.input, options: { ...get().options, ...entry.options, formatId: entry.formatId }, selectedPaths: null, collapsedPaths: new Set(), tooLargeForLive: false }),
+      restoreHistory: (entry) => set({ input: entry.input, options: { ...get().options, ...entry.options, formatId: entry.formatId }, selectedPaths: null, collapsedPaths: new Set(), tooLargeForLive: false, analysisSource: null }),
       nextSample: () => {
         const index = get().sampleIndex % SAMPLES.length;
         const sample = SAMPLES[index];
-        set((state) => ({ input: sample.text, sampleIndex: state.sampleIndex + 1, options: { ...state.options, inputMode: sample.id === 'ndjson' ? 'ndjson' : 'auto' }, tooLargeForLive: false }));
+        set((state) => ({ input: sample.text, sampleIndex: state.sampleIndex + 1, options: { ...state.options, inputMode: sample.id === 'ndjson' ? 'ndjson' : 'auto' }, tooLargeForLive: false, analysisSource: null }));
         return sample.label;
       },
-      clear: () => set({ input: '', compareInput: '', selectedPaths: null, collapsedPaths: new Set(), tooLargeForLive: false, ...emptyAnalysis() }),
+      clear: () => set({ input: '', compareInput: '', selectedPaths: null, collapsedPaths: new Set(), tooLargeForLive: false, graphModel: null, graphSource: null, ...emptyAnalysis() }),
     }),
     {
       name: NEW_STORAGE_KEY,
