@@ -10,7 +10,7 @@
  * picked up automatically because every response is revalidated.
  */
 
-const CACHE_NAME = 'keys-from-json-v1';
+const CACHE_NAME = 'keys-from-json-v3';
 const CACHE_PREFIX = 'keys-from-json-';
 
 self.addEventListener('install', (event) => {

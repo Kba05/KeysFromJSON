@@ -1,257 +1,131 @@
 # Keys from JSON
 
-Pull every key out of a JSON document and turn it into the code you actually need — a quoted
-list, a set of key paths, a TypeScript type, SQL columns, a language model class, or whatever
-your own template says.
+A private, offline-friendly JSON workbench for extracting keys and paths, generating code and schemas, comparing payloads, and exploring JSON as a tree or graph. Everything runs in the browser: there is no backend, account, analytics, or upload.
 
-It is a single static page. Parsing, schema inference and code generation all run in the tab;
-there is no server, no upload, no account and no analytics.
+## Stack
 
-```
-{
-  "user": { "id": 1, "address": { "city": "London" } },
-  "items": [{ "sku": "A-1", "qty": 2 }],
-  "tags": ["a", "b"]
-}
-```
-
-becomes
-
-```ts
-export type Root = {
-  user: RootUser;
-  items: RootItemsItem[];
-  tags: string[];
-};
-
-export type RootUser = {
-  id: number;
-  address: RootUserAddress;
-};
-
-export type RootUserAddress = {
-  city: string;
-};
-
-export type RootItemsItem = {
-  sku: string;
-  qty: number;
-};
-```
+- React 19, Vite 8, and TypeScript 7
+- Zustand for typed application state and persisted preferences
+- Tailwind CSS 4 and shadcn/ui-style components built on Radix primitives
+- React Flow and Dagre for the read-only JSON graph
+- Vitest and Testing Library
+- pnpm with a committed lockfile
 
 ## Quick start
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # static bundle in dist/
-npm test         # node --test tests/
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-The build output is plain static files — open `dist/index.html` from any static host, or use
-`npm run preview`.
+The development server is available at `http://localhost:5173`. Production commands:
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm check
+pnpm build
+pnpm check:build
+```
+
+`pnpm build` creates a static bundle in `dist/`. The production base path is `/KeysFromJSON/` for GitHub Pages.
+
+## Features
+
+- Strict JSON, NDJSON, auto-detection, and relaxed input modes
+- Precise parse diagnostics and one-click repair for recoverable mistakes
+- 36 output formats: key lists, path notations, TypeScript, Zod, JSON Schema, SQL, language models, templates, and more
+- Filtering, sorting, case conversion, wrappers, de-duplication, regular expressions, and stable path-based selection
+- Tri-state tree selection with a 4,000-field rendering limit
+- Read-only graph view with pan, zoom, minimap, controls, type colors, and Dagre layout
+- Document comparison: union, shared paths, only A, and only B
+- Local history, theme persistence, compatible share links, keyboard shortcuts, drag-and-drop, and file export
+- Installable PWA with offline caching
+
+Live rendering uses a 160 ms debounce and pauses automatically for inputs larger than 1,500,000 characters.
+
+## JSON graph
+
+The `Tree / Graph` tabs show two independent views of the parsed source. The graph always represents the original JSON and is not affected by formatter filters or tree selection.
+
+- Objects, arrays, and primitives use separate node types.
+- Edges show object keys or array indexes.
+- A single document starts at `$`; NDJSON gets a virtual `Documents` root.
+- Node IDs use the document number and an escaped JSON Pointer path.
+- String previews are shortened to 80 characters without changing source data.
+- Rendering is capped at 1,000 real nodes. Omitted branches are represented by summary nodes and a warning.
+- Layout is calculated only for valid JSON when the Graph tab is open.
 
 ## Output formats
 
-36 formats, grouped in the picker.
-
-| Group | Formats |
+| Group | Examples |
 | --- | --- |
-| Key lists | quoted key list, bare names, JSON array, JSON Lines, CSV header, TSV row, count report |
-| Key paths | `dot`, `dot[index]`, `["bracket"]`, JSONPath, `jq`, JSON Pointer (RFC 6901), `column_name` |
-| TypeScript & schemas | `type` (nested types extracted), inline `type`, `interface`, flat leaf fields, Zod schema |
-| Other languages | C# class, Kotlin data class, Java record, Go struct, Python dataclass, Python `TypedDict`, Swift struct, Rust struct |
-| SQL | column list, `CREATE TABLE` with inferred types |
-| Data formats | YAML key skeleton, dotenv lines, JSON skeleton, JSON Schema (2020-12), required/optional split |
-| Other | custom template (per-key), custom template (inline) |
+| Key lists | quoted/bare names, JSON array, JSON Lines, CSV, TSV, count report |
+| Paths | dot, bracket, JSONPath, `jq`, JSON Pointer, column names |
+| TypeScript & schema | type, interface, flat fields, Zod, JSON Schema |
+| Languages | C#, Kotlin, Java, Go, Python, Swift, Rust |
+| SQL | column list, `CREATE TABLE` |
+| Data | YAML skeleton, dotenv, JSON skeleton |
+| Custom | per-key and inline templates |
 
-Every generator that produces declarations keeps optional and nullable separate: a key that is
-missing from some array elements becomes `?` / `Optional` / `Option`, a key whose value can be
-`null` becomes `| null` / `?` / `Option`, and a key that is both gets both.
-
-## Input modes
-
-| Mode | Behaviour |
-| --- | --- |
-| Auto-detect | Tries JSON, then NDJSON. The default. |
-| JSON only | Strict JSON. A parse failure is reported, never guessed at. |
-| NDJSON / JSON Lines | One document per non-empty line; every line becomes a document. |
-| Relaxed input | Also accepts `//` and `/* */` comments, single-quoted strings, unquoted keys, trailing commas, `NaN` and `Infinity`. |
-
-When strict parsing fails, the error names the reason, the line, the column and shows a caret
-under the exact character, plus a **Repair** button when the input is one of the recoverable
-mistakes. This is done with a hand-written parser rather than `JSON.parse`'s message, because
-V8 only reports a position some of the time — `{"a": 1, "b": ,}` comes back as
-`Unexpected token ',', ...` with no location at all.
-
-## Options
-
-- **Key wrapper** — 16 presets (`"…"`, `'…'`, `‹…›`, `«…»`, `❝…❞`, `[…]`, `{…}`, `` `…` ``,
-  `{{…}}`, `${…}`, `#…#`, `<!--…-->`, …) or a custom left/right pair, with optional mirroring.
-- **Name source** — the key name, or the full path.
-- **Case** — keep as-is, `camelCase`, `PascalCase`, `snake_case`, `CONSTANT_CASE`, `kebab-case`,
-  `dot.case`, lowercase, UPPERCASE. Applied per path segment.
-- **Separator** — comma + space, comma + newline, comma + newline with a leading comma (the
-  original tool's style), one per line, space, semicolon, pipe.
-- **Sort** — document order, A→Z, Z→A, shallow first, deep first, shortest first.
-- **Paths** — the notation used for `Name source: path`, path output formats and the template
-  `{{path}}` token. Real array indices can be shown (`list[0].name`) or normalised (`list[].name`).
-- **Filtering** — all keys / leaf keys only / objects and arrays only, a depth limit, de-duplication
-  by name, by path or off (with optional case-insensitivity).
-- **Search & patterns** — a substring filter, plus include and exclude regular expressions.
-  Invalid patterns are reported inline instead of throwing.
-- **Generated code** — the root type / table name, indent, typed JSON skeleton placeholders, and
-  `readonly` / `export` for TypeScript.
-
-### Key tree
-
-The tree lists every key path with tri-state checkboxes, so the output can be narrowed to a
-subset instead of being all-or-nothing. Selection is keyed by path, not by record, which means
-it survives edits to the JSON. `All`, `None`, `Leaves` and `Select matches` are one click each.
-
-### Comparing two documents
-
-Paste a second document to get the **union**, the **shared** paths, or what exists **only in A**
-or **only in B** — useful for a v1/v2 response diff or a staging/production config check.
-
-### Sharing and history
-
-**Link** packs the input and every option into the URL fragment and copies it. A fragment never
-reaches a server, which is what keeps this compatible with "nothing leaves this tab". Recent
-inputs are also kept in `localStorage` (15 entries, ≤60 kB each) and offered from the **History**
-menu.
+Optionality and nullability remain distinct in generated declarations.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl`/`⌘` + `K` | Focus the JSON input |
-| `Ctrl`/`⌘` + `Enter` | Render now (it also renders as you type) |
-| `Ctrl`/`⌘` + `Shift` + `C` | Copy the output |
-| `Ctrl`/`⌘` + `Shift` + `F` | Format the input |
-| `Ctrl`/`⌘` + `Shift` + `K` | Clear both areas |
-| `Ctrl`/`⌘` + `/` | Shortcut help |
+| `Ctrl`/`⌘` + `K` | Focus JSON input |
+| `Ctrl`/`⌘` + `Enter` | Render now |
+| `Ctrl`/`⌘` + `Shift` + `C` | Copy output |
+| `Ctrl`/`⌘` + `Shift` + `F` | Format input |
+| `Ctrl`/`⌘` + `Shift` + `K` | Clear |
+| `Ctrl`/`⌘` + `/` | Open shortcut help |
 
 ## Architecture
 
-```
-index.html              markup only; every control the controller looks up lives here
+```text
 src/
-  main.js               entry: imports Bootstrap CSS, app CSS, starts the app
-  samples.js            sample documents, each one exercising a different behaviour
-  core/                 pure, DOM-free, fully unit-tested
-    json-parse.js         strict + relaxed parsing, diagnostics, NDJSON, repair
-    extract.js            JSON → flat list of key records
-    schema.js             JSON → merged type tree (unions, optionality, nullability)
-    keypath.js            path notation rendering
-    naming.js             word splitting, case conversion, quoting, escaping
-    decorate.js           filtering, de-duplication, sorting, wrapping → final name list
-  formats/              one pure function per output format
-    index.js              the registry; add a format by exporting it from a module
-    helpers.js  typescript.js  zod.js  code-langs.js  sql.js
-    yaml.js  json.js  list.js  paths.js  template.js
-  ui/
-    app.js                controller: state, events, rendering
-    state.js              defaults, persistence, UI options → engine options
-    tree.js  diff.js  share.js  history.js  files.js  toast.js  presets.js  dom.js
-  styles/app.css
-tests/                  node:test suites for core, formats, generated shapes,
-                        plus a jsdom end-to-end smoke test of the whole app
-scripts/                static checks that need no browser (see Testing)
-public/                 icon, web app manifest, service worker
+  main.tsx                 React entry point
+  App.tsx                  application composition and browser interactions
+  components/ui/           shadcn/ui-style primitives
+  components/key-tree.tsx  selectable structure tree
+  components/json-graph.tsx React Flow graph viewer
+  store/app-store.ts       typed Zustand state and persistence boundary
+  graph/json-to-graph.ts   pure JSON-to-React-Flow adapter and Dagre layout
+  core/                    pure parsing, extraction, paths, naming, and schema
+  formats/                 36 pure output formatters and registry
+  ui/                      pure UI-facing helpers: history, share, diff, files
+  types.ts                 shared domain types
+tests/                     Vitest unit and React integration tests
+scripts/                   formatter and production-bundle smoke checks
+public/                    icon, manifest, and service worker
 ```
 
-Data flow, one direction only:
+The generation pipeline stays independent of React:
 
+```text
+text → parseDocuments → docs → extractAll → fields → buildKeyItems → items
+                              └→ buildSchema → schema ───────────────┘
+                                                        renderFormat → output
 ```
-text ──parseDocuments──▶ docs ──extractAll──▶ fields ──buildKeyItems──▶ items
-                                  │                                      │
-                                  └──buildSchema──▶ schema ──renderFormat─┘──▶ output
-```
 
-The core knows nothing about the DOM; the UI knows nothing about generation. That is what makes
-the interesting half of the app testable in Node with no browser.
+The graph adapter is also pure: `jsonToGraph(docs)` returns typed React Flow nodes, edges, counts, and truncation details.
 
-## Adding an output format
+## Persistence and compatibility
 
-1. Write a pure `run(ctx)` in one of the `src/formats/*.js` modules. `ctx` is
-   `{ fields, items, stats, docs, schema, options }`.
-2. Add `{ id, label, group, hint, schema?, run }` to that module's exported array. Set
-   `schema: true` when the format needs the schema tree rather than only the key list.
-3. Nothing else changes — the picker, the file extension map and the tests pick it up from the
-   registry.
+The Zustand persist middleware stores only options and theme under `kfj.app.v3`. Input documents, generated output, graph data, and transient UI state are not stored there. On first use, the app imports values from `kfj.options.v2` and `kfj.theme` without deleting them. Existing `kfj.history.v2` entries and share-link payloads remain compatible.
 
 ## Testing
 
-```bash
-npm test               # node --test tests/          — 130 tests
-npm run check          # tests + formatter registry check + markup/controller check
-npm run check:formats  # run all 36 formatters over awkward documents
-npm run check:dom      # every byId()/selector/label resolves against index.html
-npm run check:build    # boot the built bundle and drive it (run a build first)
-npm run test:fast      # the same suite in one process (see below)
-```
-
-The core and the formatter suites use Node's built-in runner and no test framework; the core and
-the formatters are plain ES modules with no transform step, so there is nothing for a bundler to do
-and nothing extra to keep up to date.
-
-`tests/app-smoke.test.js` is the end-to-end layer: it boots the real `index.html` in jsdom and
-drives the real controller — paste, parse, filter, switch format, break the regex, hit Repair,
-deselect a tree branch, diff two documents, pause live rendering on a huge paste, press a shortcut.
-It exists because three genuine bugs were invisible to every other check: a constant used but never
-imported, a DOM helper that only accepted an array of children, and a stale tree selection that
-silently emptied the output. It is the only test that runs the app rather than its parts.
-
-The two checks in `scripts/` cover what even that cannot. `check:formats` runs every formatter over
-documents built to be awkward — arrays of objects whose keys disagree, primitives and strings in
-arrays, nulls, empty containers, nested arrays, mixed primitive types — and fails on a thrown error,
-empty output, or a generator that declares the same nested type twice. `check:dom` proves every
-element, attribute selector and `label[for]` the controller depends on still exists in the markup.
-
-`check:build` closes the last gap: it boots the real `dist/index.html` in jsdom and imports the
-bundled, minified JavaScript, so the artifact CI is about to publish is exercised rather than the
-source it was built from.
-
-Everything runs in CI before the build is published, and none of it needs a browser download.
-
-`node --test tests/` runs each file in its own child process. In a locked-down environment that
-forbids child processes with piped stdio (some Windows sandboxes, for instance), use
-`npm run test:fast`, which runs the same files in-process.
+The suite contains 139 Vitest tests covering parsing, repair, extraction, schema inference, all formatters, generated shapes, share/history/diff helpers, React interactions, and the graph adapter. `pnpm check:formats` additionally executes all 36 formatters against awkward and mixed documents. After building, `pnpm check:build` imports the minified production bundle in jsdom and verifies the GitHub Pages artifact.
 
 ## Deployment
 
-`.github/workflows/deploy.yml` runs the tests, builds, and publishes `dist/` to GitHub Pages on
-every push to `main`. The production `base` is `/KeysFromJSON/` in `vite.config.js` — change it if
-you fork the repository under a different name.
-
-Because Bootstrap is imported from `node_modules` rather than a CDN and a service worker caches
-the shell, the deployed app also works offline and can be installed as a desktop app.
+`.github/workflows/deploy.yml` installs pnpm dependencies with `--frozen-lockfile`, runs checks, builds, validates the bundle, and publishes `dist/` to GitHub Pages on pushes to `main`.
 
 ## Privacy
 
-Everything is client-side. The only network requests are for the app's own assets. Nothing is
-uploaded, nothing is logged, and the optional share link keeps its payload in the URL fragment,
-which browsers never send to a server.
-
-## What changed from the original version
-
-The first version was two files and worked for simple input. Along the way it had defects worth
-naming, because the regression suite exists to keep them fixed:
-
-| Was | Is |
-| --- | --- |
-| `JSON.parse` in a click handler, so invalid input failed silently | Parse errors with the reason, line, column, a caret snippet and a one-click repair |
-| `for…in` over strings leaked array indices as keys (`["a","b"]` → `"0"`, `"1"`) | Arrays contribute the keys of their elements and nothing else |
-| Primitive array items produced `''`, so output could start with a stray `, ` | Empty keys are impossible; the tree and list show only real keys |
-| De-duplication ran per recursion branch, so repeated keys survived | One global de-duplication pass, by name or by path, in document order |
-| Children were emitted before their parent | Parent before children, in document order |
-| Custom wrappers were symmetric only, and stored as a space-split string | Real left/right wrapper pairs, 16 presets, mirror toggle |
-| Switching the wrapper radio reset the other control's value | Both choices are preserved |
-| `document.execCommand('copy')`, no feedback | `navigator.clipboard` with a fallback and a confirmation toast |
-| Bootstrap's JS bundle loaded but unused, everything from a CDN, no offline support | Only the components used, self-hosted, service worker, installable |
-| `col-3 / col-4 / col-5`, cramped on mobile | Responsive layout, sticky panels, dark theme, print styles |
-| `title` was "Bootstrap demo", textareas had no labels | Real title and metadata, `<label>`/`aria-live`/`role="alert"` throughout |
+Everything is processed locally. Share data lives in the URL fragment, which browsers do not send to the server. The only network requests are for the app's own static assets.
 
 ## License
 

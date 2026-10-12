@@ -1,34 +1,59 @@
 {
   "name": "keys-from-json",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Pull every key out of a JSON document and turn it into the code you actually need: a quoted list, key paths, TypeScript types, SQL columns and more. Runs entirely in the browser.",
+  "packageManager": "pnpm@10.15.1",
+  "description": "Turn JSON keys and structure into code, schemas, paths, and an interactive graph — entirely in the browser.",
   "keywords": [
     "json",
     "keys",
     "developer-tools",
     "typescript",
-    "jsonpath"
+    "jsonpath",
+    "react-flow"
   ],
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --test tests/",
-    "test:fast": "node --test --experimental-test-isolation=none \"tests/*.test.js\"",
-    "test:watch": "node --test --watch tests/",
-    "check:formats": "node scripts/check-formatters.mjs",
-    "check:dom": "node scripts/check-dom.mjs",
-    "check:build": "node scripts/check-build.mjs",
-    "check": "npm test && npm run check:formats && npm run check:dom"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run --pool=threads --maxWorkers=1",
+    "test:watch": "vitest --pool=threads --maxWorkers=1",
+    "check:formats": "tsx scripts/check-formatters.ts",
+    "check:build": "tsx scripts/check-build.ts",
+    "check": "pnpm typecheck && pnpm test && pnpm check:formats"
   },
   "dependencies": {
-    "bootstrap": "^5.3.3"
+    "@dagrejs/dagre": "^3.1.1",
+    "@xyflow/react": "^12.12.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.545.0",
+    "radix-ui": "^1.4.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.3.1",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1",
-    "vite": "^5.4.11"
+    "@tailwindcss/vite": "^4.1.14",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/dagre": "^0.7.54",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^24.7.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^27.0.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.20.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
   }
 }
